@@ -1,0 +1,114 @@
+require 'mathias-peers-thermostat-exercise'
+require 'optparse'
+
+led = Led.new
+relais = Relais.new
+log = Log.new
+temp = Temperature.new
+web = Web.new
+transport = Transport.new
+input = UserInput.new
+
+# this hash will hold all of the options
+# parsed from the command-line by
+# OptionParser
+options = {}
+
+# We give a block argument with the constructor
+optparse = OptionParser.new do |opts|
+    # set a banner, displayed at the top
+    # of the help screen
+    opts.banner = "Usage: app.rb [options]"
+
+    # define the options, and what they do
+    opts.on('-m', '--method M', String, 'How to get temperature [user], [url], [mqtt]') do |method|
+        options[:method] = method
+    end
+
+    opts.on('-c', '--celsius TEMP', Float, 'Enter the temperature in Celsius') do |celsius|
+        options[:temperature] = temp.convert('c', celsius)
+    end
+
+    opts.on('-k', '--kelvin TEMP', Float, 'Enter the temperature in Kelvin') do |kelvin|
+        options[:temperature] = temp.convert('k', kelvin)
+    end
+
+    opts.on('-f', '--fahrenheit TEMP', Float, 'Enter the temperature in Fahrenheit') do |fahrenheit|
+        options[:temperature] = temp.convert('f', fahrenheit)
+    end
+
+    opts.on('-r', '--range R', Float, 'Enter the range') do |range|
+        options[:range] = range
+    end
+
+    opts.on('-w', '--wanted W', Float, 'Enter the wanted temperature (in Celsius)') do |set|
+        options[:set] = set
+    end
+
+    opts.on('-h', '--help', 'Get this help screen') do
+        puts opts
+        exit
+    end
+end
+
+optparse.parse!
+
+if options[:method] == 'user'
+    input.askData
+    conversion = temp.convert(input.get_temp, input.get_unit)
+
+    led.check_led(conversion, input.get_set, input.get_range)
+    relais.set(conversion, input.get_set, input.get_range)
+
+    puts relais.get_heating
+    puts relais.get_cooling
+    puts led.get_led
+
+    log.addContent(relais.get_heating)
+    log.addContent(relais.get_cooling)
+    log.addContent(led.get_fcolor)
+end
+
+if options[:method] == 'url'
+    update = Thread.new do
+
+        while true do
+            puts "\n"
+            temp = web.url
+
+            led.check_led(temp, options[:set], options[:range])
+            relais.set(temp, options[:set], options[:range])
+
+            puts relais.get_heating
+            puts relais.get_cooling
+            puts led.get_led
+
+            log.addContent(relais.get_heating)
+            log.addContent(relais.get_cooling)
+            log.addContent(led.get_fcolor)
+
+            sleep(10)
+        end
+    end
+    update.join
+end
+
+if options[:method] == 'mqtt'
+    transport.on_change do |temp|
+        puts temp
+
+        led.check_led(temp, options[:set], options[:range])
+        relais.set(temp, options[:set], options[:range])
+
+        puts relais.get_heating
+        puts relais.get_cooling
+        puts led.get_led
+
+        log.addContent(relais.get_heating)
+        log.addContent(relais.get_cooling)
+        log.addContent(led.get_fcolor)
+
+        transport.send_color(led.get_color)
+    end
+    transport.get_connection
+end
